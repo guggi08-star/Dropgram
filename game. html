@@ -1,0 +1,401 @@
+Ниже представлен полный код Telegram Mini App, объединенный в один HTML-файл. 
+
+**Важное предупреждение:** этот код является **демонстрационным прототипом**. В нём нет реального сервера, базы данных и интеграции с Telegram Payments (Stars). Все данные (баланс, NFT, инвентарь) хранятся в оперативной памяти браузера и полностью сбрасываются при обновлении страницы. Для запуска полноценной игры потребуется написать бэкенд.
+
+```html
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>NFT Маркет в Telegram</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --bg: #f5f5f5;
+            --card: #ffffff;
+            --primary: #007bff;
+            --success: #28a745;
+            --danger: #dc3545;
+            --star: #ffc107;
+        }
+
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            margin: 0; 
+            padding: 20px; 
+            background: var(--bg); 
+            color: #333;
+        }
+        .container { max-width: 600px; margin: 0 auto; }
+        
+        .wallet { 
+            background: var(--card); 
+            padding: 15px; 
+            border-radius: 12px; 
+            margin-bottom: 20px; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        
+        .section-title { 
+            margin: 20px 0 10px 0; 
+            font-size: 18px; 
+            color: #555; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+        }
+        
+        .btn-add-nft {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .nft-grid { 
+            display: grid; 
+            grid-template-columns: 1fr 1fr; 
+            gap: 15px; 
+        }
+        .nft-card { 
+            background: var(--card); 
+            border-radius: 12px; 
+            overflow: hidden; 
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            transition: transform 0.2s;
+        }
+        .nft-card:hover { transform: translateY(-3px); }
+        .nft-image { 
+            width: 100%; 
+            height: 120px; 
+            object-fit: cover; 
+            background: #eee; 
+            display: block;
+        }
+        .nft-info { 
+            padding: 10px; 
+            font-size: 14px;
+        }
+        .nft-info b { display: block; font-size: 15px; margin-bottom: 4px; }
+        .btn { 
+            background: var(--primary); 
+            color: white; 
+            border: none; 
+            padding: 8px 12px; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            width: 100%; 
+            font-size: 14px;
+            margin-top: 8px;
+        }
+        .btn:disabled { 
+            background: #ccc; 
+            cursor: not-allowed; 
+        }
+        .btn-success { background: var(--success); }
+        .btn-danger { background: var(--danger); }
+
+        .owner-panel { 
+            background: #e3f2fd; 
+            padding: 15px; 
+            border-radius: 12px; 
+            margin-bottom: 20px; 
+            border: 1px solid #b3e5fc;
+        }
+        .owner-panel h3 { margin-top: 0; }
+        .owner-panel button { margin-bottom: 8px; }
+
+        /* Модальное окно */
+        #createModal { 
+            display: none; 
+            position: fixed; 
+            top: 0; left: 0; 
+            width: 100%; height: 100%; 
+            background: rgba(0,0,0,0.6); 
+            align-items: center; 
+            justify-content: center; 
+            z-index: 100;
+        }
+        .modal-content { 
+            background: white; 
+            padding: 20px; 
+            border-radius: 12px; 
+            width: 90%; 
+            max-width: 400px; 
+            position: relative;
+        }
+        .modal-content h3 { margin-top: 0; }
+        .modal-content input, .modal-content textarea { 
+            width: 100%; 
+            padding: 10px; 
+            border: 1px solid #ddd; 
+            border-radius: 8px; 
+            margin-bottom: 12px; 
+            box-sizing: border-box;
+        }
+        .modal-close {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Профиль пользователя -->
+        <div class="wallet">
+            <div>
+                <div id="user-name" style="font-weight: bold;">Загрузка...</div>
+                <div id="user-balance" style="color: var(--star); font-size: 18px; margin-top: 4px;">★ 0</div>
+            </div>
+            <button id="btn-topup" class="btn">⭐ Пополнить</button>
+        </div>
+
+        <!-- Панель владельца (видна только админу) -->
+        <div id="owner-panel" class="owner-panel" style="display: none;">
+            <h3>🛠 Панель владельца</h3>
+            <button id="btn-create-nft" class="btn">➕ Создать новый NFT</button>
+            <button id="btn-give-stars" class="btn btn-success">🎁 Выдать звёзды</button>
+        </div>
+
+        <!-- Маркетплейс -->
+        <div class="section-title">
+            <span>🛒 Маркет</span>
+            <button id="btn-add-nft-market" class="btn-add-nft">+</button>
+        </div>
+        <div class="nft-grid" id="marketplace"></div>
+
+        <!-- Мои подарки (Инвентарь) -->
+        <div class="section-title">
+            <span>🎁 Мои подарки</span>
+        </div>
+        <div class="nft-grid" id="my-inventory"></div>
+    </div>
+
+    <!-- Модалка создания NFT -->
+    <div id="createModal">
+        <div class="modal-content">
+            <span class="modal-close" id="btn-close">&times;</span>
+            <h3>⭐ Создать NFT для продажи</h3>
+            <input type="text" id="nft-title" placeholder="Название NFT">
+            <input type="number" id="nft-price" placeholder="Цена в звёздах" min="1">
+            <input type="file" id="nft-file" accept="image/*" style="margin-bottom: 15px;">
+            <textarea id="nft-desc" placeholder="Описание (опционально)" rows="3"></textarea>
+            <button id="btn-save-nft" class="btn">Опубликовать на маркет</button>
+        </div>
+    </div>
+
+    <script>
+        // === ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ===
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+
+        // Замените на свой реальный Telegram ID
+        const OWNER_ID = 123456789; 
+        
+        let userData = tg.initDataUnsafe.user;
+        let isOwner = userData.id === OWNER_ID;
+
+        // Эмуляция базы данных (в реальности - сервер)
+        let nfts = [
+            { id: 1, ownerId: OWNER_ID, image: 'https://placehold.co/300x200/E91E63/FFFFFF/png?text=Золотой+медведь', price: 50, title: 'Золотой медведь', desc: 'Редкий коллекционный предмет' },
+            { id: 2, ownerId: OWNER_ID, image: 'https://placehold.co/300x200/2196F3/FFFFFF/png?text=Космический+заяц', price: 100, title: 'Космический заяц', desc: 'Пушистый и быстрый' },
+            { id: 3, ownerId: 111222333, image: 'https://placehold.co/300x200/x4CAF50/FFFFFF/png?text=У+пользователя', price: 20, title: 'Старый подарок', desc: 'Уже не продается' }
+        ];
+        
+        // Баланс пользователя (в реальности хранится на сервере)
+        let userBalance = 150; 
+
+        // === ОТОБРАЖЕНИЕ ДАННЫХ ===
+        function updateProfile() {
+            document.getElementById('user-name').textContent = `${userData.first_name} ${userData.last_name || ''}`;
+            document.getElementById('user-balance').textContent = `★ ${userBalance}`;
+        }
+
+        function renderMarketplace() {
+            const container = document.getElementById('marketplace');
+            container.innerHTML = '';
+            // Показываем только те NFT, которые принадлежат владельцу и находятся в продаже
+            nfts.filter(n => n.ownerId === OWNER_ID).forEach(nft => {
+                const card = document.createElement('div');
+                card.className = 'nft-card';
+                card.innerHTML = `
+                    <img src="${nft.image}" class="nft-image" alt="${nft.title}">
+                    <div class="nft-info">
+                        <b>${nft.title}</b>
+                        <span>${nft.desc || ''}</span>
+                        <div style="margin-top: 6px; color: var(--star);">★ ${nft.price}</div>
+                        <button class="btn" data-id="${nft.id}">Купить</button>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+            if (container.children.length === 0) {
+                container.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: #888; padding: 20px;">На маркете пока нет товаров</div>';
+            }
+        }
+
+        function renderInventory() {
+            const container = document.getElementById('my-inventory');
+            container.innerHTML = '';
+            // Показываем NFT, которые купил текущий пользователь (но не те, что он сам создал для продажи)
+            nfts.filter(n => n.ownerId === userData.id && n.ownerId !== OWNER_ID).forEach(nft => {
+                const card = document.createElement('div');
+                card.className = 'nft-card';
+                card.innerHTML = `
+                    <img src="${nft.image}" class="nft-image" alt="${nft.title}">
+                    <div class="nft-info">
+                        <b>${nft.title}</b>
+                        <span>${nft.desc || ''}</span>
+                        <div style="margin-top: 6px; color: #666;">Куплен за: ★ ${nft.price}</div>
+                        <button class="btn btn-danger" data-id="${nft.id}">Продать (вернуть ★ ${nft.price})</button>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        // === ЛОГИКА ВЗАИМОДЕЙСТВИЯ ===
+        document.getElementById('btn-topup').addEventListener('click', () => {
+            // В реальной версии: tg.openInvoice({...}) для пополнения через Telegram Stars
+            alert('Функция пополнения звёздами подключается через Telegram Payments API на сервере.');
+        });
+
+        // Покупка NFT
+        document.getElementById('marketplace').addEventListener('click', (e) => {
+            if (e.target.classList.contains('btn') && !e.target.classList.contains('btn-danger')) {
+                const nftId = parseInt(e.target.dataset.id);
+                const nft = nfts.find(n => n.id === nftId);
+                if (!nft) return;
+
+                if (userBalance >= nft.price) {
+                    // В реальности: запрос на бэкенд -> проверка платежа -> обновление БД
+                    if (confirm(`Купить "${nft.title}" за ★ ${nft.price}?`)) {
+                        userBalance -= nft.price;
+                        nft.ownerId = userData.id; 
+                        updateProfile();
+                        renderMarketplace();
+                        renderInventory();
+                    }
+                } else {
+                    alert('Недостаточно звёзд для покупки.');
+                }
+            }
+        });
+
+        // Продажа (возврат) NFT из инвентаря
+        document.getElementById('my-inventory').addEventListener('click', (e) => {
+            if (e.target.classList.contains('btn-danger')) {
+                const nftId = parseInt(e.target.dataset.id);
+                const nft = nfts.find(n => n.id === nftId);
+                if (confirm(`Продать "${nft.title}" и вернуть ★ ${nft.price} на баланс?`)) {
+                    userBalance += nft.price;
+                    nft.ownerId = OWNER_ID; // Возвращаем NFT владельцу (на маркет)
+                    updateProfile();
+                    renderMarketplace();
+                    renderInventory();
+                }
+            }
+        });
+
+        // === ПАНЕЛЬ ВЛАДЕЛЬЦА ===
+        if (isOwner) {
+            document.getElementById('owner-panel').style.display = 'block';
+        }
+
+        // Открытие модалки создания NFT
+        document.getElementById('btn-create-nft').addEventListener('click', () => {
+            document.getElementById('createModal').style.display = 'flex';
+        });
+        document.getElementById('btn-close').addEventListener('click', () => {
+            document.getElementById('createModal').style.display = 'none';
+        });
+
+        // Добавление NFT напрямую в маркет (для теста без модалки)
+        document.getElementById('btn-add-nft-market').addEventListener('click', () => {
+            const newId = nfts.length > 0 ? Math.max(...nfts.map(n => n.id)) + 1 : 1;
+            nfts.push({ 
+                id: newId, 
+                ownerId: OWNER_ID, 
+                image: 'https://placehold.co/300x200/9C27B0/FFFFFF/png?text=Новый+NFT', 
+                price: 10, 
+                title: `Товар #${newId}` 
+            });
+            renderMarketplace();
+        });
+
+        // Сохранение нового NFT из модалки
+        document.getElementById('btn-save-nft').addEventListener('click', () => {
+            const title = document.getElementById('nft-title').value.trim();
+            const price = parseInt(document.getElementById('nft-price').value);
+            const fileInput = document.getElementById('nft-file');
+            const desc = document.getElementById('nft-desc').value.trim();
+
+            if (!title || !price || isNaN(price) || price <= 0) {
+                alert('Введите название и корректную цену.');
+                return;
+            }
+
+            const newId = nfts.length > 0 ? Math.max(...nfts.map(n => n.id)) + 1 : 1;
+            let imageUrl = 'https://placehold.co/300x200/607D8B/FFFFFF/png?text=NFT';
+            
+            // Заглушка: в реальности файл нужно отправить на сервер через FormData
+            if (fileInput.files.length > 0) {
+                imageUrl = URL.createObjectURL(fileInput.files[0]);
+            }
+
+            nfts.push({ 
+                id: newId, 
+                ownerId: OWNER_ID, 
+                image: imageUrl, 
+                price: price, 
+                title: title,
+                desc: desc || 'Без описания'
+            });
+
+            renderMarketplace();
+            document.getElementById('createModal').style.display = 'none';
+            document.getElementById('nft-title').value = '';
+            document.getElementById('nft-price').value = '';
+            document.getElementById('nft-file').value = '';
+            document.getElementById('nft-desc').value = '';
+        });
+
+        // Выдача звёзд (только владелец)
+        document.getElementById('btn-give-stars').addEventListener('click', () => {
+            const userId = prompt('Введите Telegram ID пользователя, которому выдать звёзды:');
+            const amount = prompt('Сколько звёзд выдать?');
+            if (userId && amount && !isNaN(amount)) {
+                // В реальности: вызов API сервера, который через Bot API списывает/начисляет звёзды
+                alert(`Запрос на выдачу ${amount} звёзд пользователю ${userId} отправлен на сервер.`);
+            }
+        });
+
+        // Инициализация
+        updateProfile();
+        renderMarketplace();
+        renderInventory();
+    </script>
+</body>
+</html>
+```
+
+### Как добавить этот код в Telegram:
+1. Сохраните этот код в файл с расширением `.html` (например, `game.html`).
+2. Загрузите файл на любой хостинг, который отдает файлы по прямой ссылке (например, GitHub Pages, Vercel, Netlify или российские Timeweb, Beget).
+3. Откройте @BotFather в Telegram.
+4. Отправьте боту команду `/setmenubutton`.
+5. Выберите своего бота и вставьте прямую ссылку на загруженный HTML-файл.
+6. Теперь при нажатии на кнопку меню в вашем боте будет открываться эта игра.
